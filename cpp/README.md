@@ -7,10 +7,14 @@
 ### 1. 教材
 
 - [`textbook/object-lifetime-and-special-member-functions.md`](./textbook/object-lifetime-and-special-member-functions.md)
-  - 当前对象生命周期与特殊成员函数专题的**唯一主教材**。
-  - 从设计哲学出发，系统覆盖 constructor/destructor、copy/move、`= default`、`= delete`、特殊成员函数隐式生成与抑制关系、RAII、Rule of Three/Five/Zero、C++17 copy elision 等。
+  - 对象模型、生命周期与特殊成员函数专题。
+  - 从 storage / lifetime / object representation / subobject 开始，系统覆盖 constructor/destructor、copy/move、`= default`、`= delete`、特殊成员函数隐式生成与抑制关系、RAII、Rule of Three/Five/Zero、C++17 copy elision 等。
 
-后续新增专题也统一放入 `textbook/`，避免同时维护多个内容重叠的 notes 版本。
+- [`textbook/polymorphism-overload-and-dispatch.md`](./textbook/polymorphism-overload-and-dispatch.md)
+  - 多态、重载、名字查找与虚派发专题。
+  - 从 Base subobject、most-derived object、static type / dynamic type 开始，系统覆盖 name lookup、overload resolution、name hiding、`using Base::f`、override、virtual dispatch、default arguments、构造/析构期虚调用、object slicing、virtual destructor、RTTI、多继承二义性等。
+
+后续新增专题统一放入 `textbook/`，避免同时维护多个内容重叠的 notes 版本。
 
 ### 2. 学习方法
 
@@ -29,6 +33,22 @@
 - [`mock-exam-01.md`](./mock-exam-01.md)
   - 第一套 40 题中高级 C++ 模拟选择题。
   - 建议在完成对应教材专题后用于阶段性验收。
+
+## 建议学习顺序
+
+```text
+1. object-lifetime-and-special-member-functions.md
+        ↓
+   先建立 object / subobject / lifetime / value / identity 模型
+        ↓
+2. polymorphism-overload-and-dispatch.md
+        ↓
+   在对象模型上建立 static type / dynamic type / call dispatch 模型
+        ↓
+3. reviews + mock-exam
+        ↓
+   用少量题目验证模型是否稳定
+```
 
 ## 目录职责
 
