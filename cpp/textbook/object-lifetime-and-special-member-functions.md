@@ -1,154 +1,490 @@
-# C++ 对象生命周期与特殊成员函数：从设计哲学到规则体系
+# C++ 对象模型、生命周期与特殊成员函数
 
 > **语义基线：C++17**  
-> 本文是一份连续学习教材，不以刷题或背规则为目标。选择题只能用于最后验证：如果不能从对象语义和语言规则推导出答案，就不算真正掌握。
+> 本文从 **对象在内存中如何存在** 与 **C++ 对象语义如何建立** 出发，再推导 constructor / destructor / copy / move / `= default` / `= delete` 以及特殊成员函数之间的生成关系。  
+> 学习目标不是背规则表，而是形成一套可以自行推导的对象模型。
 
 ---
 
 ## 目录
 
-1. [为什么 C++ 需要特殊成员函数](#1-为什么-c-需要特殊成员函数)
-2. [先建立对象生命周期总图](#2-先建立对象生命周期总图)
-3. [构造函数应该怎样分类](#3-构造函数应该怎样分类)
-4. [六类特殊成员函数分别解决什么问题](#4-六类特殊成员函数分别解决什么问题)
-5. [construction 与 assignment 为什么必须分开](#5-construction-与-assignment-为什么必须分开)
-6. [编译器为什么可以自动生成这些函数](#6-编译器为什么可以自动生成这些函数)
-7. [理解规则前必须掌握的术语](#7-理解规则前必须掌握的术语)
-8. [`= default` 的准确含义](#8--default-的准确含义)
-9. [`= delete` 的准确含义](#9--delete-的准确含义)
-10. [第一阶段：特殊成员函数的隐式声明与抑制关系](#10-第一阶段特殊成员函数的隐式声明与抑制关系)
-11. [完整二维关系表](#11-完整二维关系表)
-12. [逐行解释二维表为什么这样设计](#12-逐行解释二维表为什么这样设计)
-13. [第二阶段：base/member 能力如何传播到外层类](#13-第二阶段basemember-能力如何传播到外层类)
-14. [第三阶段：具体调用点还要经过重载决议](#14-第三阶段具体调用点还要经过重载决议)
-15. [`std::move` 到底做了什么](#15-stdmove-到底做了什么)
-16. [有名字的右值引用为什么仍是左值表达式](#16-有名字的右值引用为什么仍是左值表达式)
-17. [move 不存在、move 被 delete、defaulted move 被 delete：三者必须区分](#17-move-不存在move-被-deletedefaulted-move-被-delete三者必须区分)
-18. [析构函数与资源所有权](#18-析构函数与资源所有权)
-19. [为什么“默认构造函数里 new 了内存”不会改变隐式 move 规则](#19-为什么默认构造函数里-new-了内存不会改变隐式-move-规则)
-20. [Rule of Three / Five / Zero](#20-rule-of-three--five--zero)
-21. [C++17 拷贝消除：不要机械地数 copy/move](#21-c17-拷贝消除不要机械地数-copymove)
-22. [多态基类为什么通常需要 virtual destructor](#22-多态基类为什么通常需要-virtual-destructor)
-23. [一套可重复使用的推导算法](#23-一套可重复使用的推导算法)
-24. [常见误区与纠正](#24-常见误区与纠正)
-25. [学习检查点](#25-学习检查点)
-26. [参考资料](#26-参考资料)
+1. [从最基本的问题开始：什么是 C++ 对象](#1-从最基本的问题开始什么是-c-对象)
+2. [对象的 storage、lifetime、type、value 与 identity](#2-对象的-storagelifetimetypevalue-与-identity)
+3. [对象内存布局：object representation 与 value representation](#3-对象内存布局object-representation-与-value-representation)
+4. [完整对象与子对象：C++ 类为什么天然是组合结构](#4-完整对象与子对象c-类为什么天然是组合结构)
+5. [内存布局不等于对象语义](#5-内存布局不等于对象语义)
+6. [构造与析构：让一块 storage 中的对象开始和结束生命](#6-构造与析构让一块-storage-中的对象开始和结束生命)
+7. [为什么构造顺序和析构顺序由子对象结构决定](#7-为什么构造顺序和析构顺序由子对象结构决定)
+8. [constructor 应该怎样分类](#8-constructor-应该怎样分类)
+9. [六类特殊成员函数分别解决什么问题](#9-六类特殊成员函数分别解决什么问题)
+10. [construction 与 assignment 为什么必须分开](#10-construction-与-assignment-为什么必须分开)
+11. [默认 copy/move 为什么是逐子对象语义，而不是简单 memcpy](#11-默认-copymove-为什么是逐子对象语义而不是简单-memcpy)
+12. [值语义、所有权语义与 RAII](#12-值语义所有权语义与-raii)
+13. [理解规则前必须掌握的术语](#13-理解规则前必须掌握的术语)
+14. [`= default`：显式选择编译器定义的默认对象语义](#14--default显式选择编译器定义的默认对象语义)
+15. [`= delete`：在类型系统里禁止某种对象操作](#15--delete在类型系统里禁止某种对象操作)
+16. [特殊成员函数第一阶段：声明与抑制关系](#16-特殊成员函数第一阶段声明与抑制关系)
+17. [完整二维关系表](#17-完整二维关系表)
+18. [为什么这张表必须区分 S、D、P](#18-为什么这张表必须区分-sdp)
+19. [逐行解释抑制矩阵](#19-逐行解释抑制矩阵)
+20. [第二阶段：base/member 能力如何传播到外层对象](#20-第二阶段basemember-能力如何传播到外层对象)
+21. [第三阶段：具体调用点还要经过 overload resolution](#21-第三阶段具体调用点还要经过-overload-resolution)
+22. [`std::move` 与对象语义：它并不移动内存](#22-stdmove-与对象语义它并不移动内存)
+23. [为什么有名字的 `T&&` 是 lvalue expression](#23-为什么有名字的-t-是-lvalue-expression)
+24. [move 不存在、显式 deleted、defaulted 后 deleted](#24-move-不存在显式-deleteddefaulted-后-deleted)
+25. [为什么 constructor 中 `new` 不会改变隐式生成规则](#25-为什么-constructor-中-new-不会改变隐式生成规则)
+26. [Rule of Three / Five / Zero](#26-rule-of-three--five--zero)
+27. [多态对象、vptr 与 virtual destructor](#27-多态对象vptr-与-virtual-destructor)
+28. [C++17 copy elision：对象甚至可能直接在最终 storage 中产生](#28-c17-copy-elision对象甚至可能直接在最终-storage-中产生)
+29. [统一推导算法](#29-统一推导算法)
+30. [常见误区](#30-常见误区)
+31. [学习检查点](#31-学习检查点)
+32. [参考资料](#32-参考资料)
 
 ---
 
-# 1. 为什么 C++ 需要特殊成员函数
+# 1. 从最基本的问题开始：什么是 C++ 对象
 
-先不要从语法开始，而要从一个更基本的问题开始：
+学习 constructor、destructor、copy、move 之前，先暂时忘掉这些函数。
 
-> **一个对象从创建到销毁，语言必须怎样维护它所代表的状态与资源？**
-
-最简单的对象：
+先看：
 
 ```cpp
 struct Point {
     int x;
     int y;
 };
+
+Point p{1, 2};
 ```
 
-`Point` 基本只是两个值的组合：
+从机器视角看，`p` 最终需要占据一片 storage；但从 C++ 语言视角看，**对象不只是若干字节**。
+
+C++ 对象至少同时具有下面几个维度：
 
 ```text
-Point
-├── x
-└── y
+              object
+                 │
+     ┌───────────┼───────────┐
+     │           │           │
+   storage      type       lifetime
+     │           │           │
+  若干字节     如何解释      何时对象存在
+                 │
+            value / identity
 ```
 
-复制 `Point` 时，复制 `x/y` 就足够；销毁时也没有特殊资源需要释放。
+C++ 标准的对象模型明确区分“storage”和“object”：一个对象在其构造期间、生命周期期间以及析构期间占据一片 storage，但**storage 本身并不等价于一个具有完整语义的对象**。
 
-但是下面这个类型不同：
+这一区分是后面所有生命周期规则的起点。
+
+---
+
+# 2. 对象的 storage、lifetime、type、value 与 identity
+
+可以先建立五个概念。
+
+## 2.1 Storage：对象占据的存储区域
+
+例如：
 
 ```cpp
-class File {
-    int fd;
+Point p;
+```
+
+`p` 需要占据至少 `sizeof(Point)` 字节的 storage。
+
+但“有这块内存”不代表其中任何时刻都必然存在一个活着的 `Point` 对象。
+
+例如 placement new、显式析构、union 等高级场景都会让我们看到：
+
+```text
+storage lifetime
+≠
+object lifetime
+```
+
+当前阶段先建立这个概念即可。
+
+## 2.2 Type：这些字节应按照什么规则解释
+
+同样四个字节：
+
+```text
+00 00 00 01
+```
+
+它作为 `int`、`float` 或某个 class 的一部分时，语言语义完全不同。
+
+所以对象不是“内存 + 猜测”，而是：
+
+```text
+storage
++
+type
++
+lifetime rules
+```
+
+## 2.3 Value：对象当前表示什么状态
+
+例如：
+
+```cpp
+int x = 3;
+```
+
+对象 `x` 的 value 是 `3`。
+
+对 class 来说，value 往往由多个子对象共同构成。
+
+## 2.4 Identity：这是“哪一个对象”
+
+```cpp
+Point a{1, 2};
+Point b{1, 2};
+```
+
+虽然：
+
+```text
+a 的值 == b 的值
+```
+
+但：
+
+```text
+&a != &b
+```
+
+它们是两个不同对象。
+
+这一区别对 move 很重要：
+
+> **move 通常改变对象的 value/resource state，但并不会把源对象本身从内存里“搬走”，也不会结束源对象的 lifetime。**
+
+## 2.5 Lifetime：何时可以把这片 storage 当成该类型对象使用
+
+constructor 与 destructor 的深层意义之一，就是参与建立和终止对象的生命周期语义。
+
+因此以后不要只把 constructor 理解成“初始化几个变量”，而应理解为：
+
+> **让一个特定类型的对象在 storage 中进入合法存在状态，并建立它所有子对象的初始状态。**
+
+---
+
+# 3. 对象内存布局：object representation 与 value representation
+
+对一个完整非 bit-field 对象 `T`，标准用两个重要概念描述其内存表示。
+
+## 3.1 Object representation
+
+可以粗略理解为：
+
+> **这个对象在内存中占据的全部字节。**
+
+其大小对应 `sizeof(T)`。
+
+例如：
+
+```cpp
+struct A {
+    char c;
+    int x;
 };
 ```
 
-一个 `File` 对象可能不只是保存整数 `fd`，它还代表：
+一个典型实现可能形成：
 
 ```text
-一个 C++ 对象
-+
-一个操作系统文件描述符
-+
-“谁负责 close(fd)”这一生命周期责任
+低地址
+┌──────────────┐
+│ c            │ 1 byte
+├──────────────┤
+│ padding      │ 3 bytes（示意）
+├──────────────┤
+│ x            │ 4 bytes
+└──────────────┘
+高地址
 ```
 
-再例如：
+这里 padding 的具体数量取决于 ABI、alignment 和实现。
+
+不要把示意图当成所有平台的固定布局。
+
+## 3.2 Value representation
+
+对象表示里的所有 bit 不一定都参与表示这个对象的 value。
+
+没有参与 value 表示的 bit 可以是 padding bits。
+
+所以：
+
+```text
+object representation
+      │
+      ├── value representation
+      └── padding / representation detail
+```
+
+这个区别直接解释一个重要事实：
+
+> **“两个对象具有相同的 C++ value”并不要求它们的每一个对象表示字节都完全相同。**
+
+## 3.3 `sizeof(T)` 不是“所有成员 sizeof 直接相加”
+
+因为对象布局还可能受到：
+
+```text
+alignment
+padding
+base-class layout
+ABI requirements
+implementation details
+```
+
+影响。
+
+所以：
+
+```cpp
+sizeof(A)
+```
+
+不能一般性地通过“成员大小机械相加”推导。
+
+## 3.4 不要把通用 class copy 理解成 object representation 的字节复制
+
+对普通非 union class，隐式定义的 copy/move constructor 是**逐 base/member 子对象操作**。
+
+只有 trivially copyable 等满足特定条件的类型，才允许以 `memcpy`/`memmove` 一类方式复制对象表示并保持语言允许的语义。
+
+这是后面理解 default copy/move 的重要前提。
+
+---
+
+# 4. 完整对象与子对象：C++ 类为什么天然是组合结构
+
+标准对象模型中，一个对象可以包含其他对象，这些内部对象称为 **subobject**。
+
+典型 subobject 包括：
+
+```text
+member subobject
+base-class subobject
+array-element subobject
+```
+
+例如：
+
+```cpp
+struct Header {
+    int type;
+};
+
+struct Packet : Header {
+    std::string payload;
+    int seq;
+};
+
+Packet p;
+```
+
+可以从语义上画成：
+
+```text
+complete object: p (Packet)
+│
+├── base subobject: Header
+│   └── member subobject: type
+│
+├── member subobject: payload
+└── member subobject: seq
+```
+
+这里最重要的不是精确地址，而是：
+
+> **一个 class object 在语言语义上是由 base subobjects 和 member subobjects 组合而成的。**
+
+这就是为什么 C++ 能自动生成 constructor/copy/move/destructor：
+
+```text
+外层对象语义
+=
+对子对象执行相应操作的组合
+```
+
+这是本教材最核心的模型之一。
+
+---
+
+# 5. 内存布局不等于对象语义
+
+这是整个专题中非常重要的一条边界。
+
+考虑：
 
 ```cpp
 class Buffer {
-    char* p;
+    int* p;
+    std::size_t size;
 };
 ```
 
-`p` 可能只是一个借用指针，也可能代表对象独占的一块动态内存。
-
-于是 C++ 类型需要回答一系列问题：
+从对象内存布局看，`Buffer` 内部可能只是：
 
 ```text
-对象怎样创建？
-从另一个对象复制时怎么办？
-从另一个对象转移资源时怎么办？
-给已经存在的对象赋值时怎么办？
-对象销毁时资源怎么办？
+p     : 一个地址值
+size  : 一个整数值
 ```
 
-特殊成员函数就是 C++ 用来描述这套**对象生命周期协议（object lifetime protocol）**的语言机制。
+但从程序设计语义看，`p` 可能有完全不同的含义：
+
+```text
+A. p 是 borrowed pointer
+B. p 是 unique owner
+C. p 指向共享资源
+D. p 只是缓存地址
+```
+
+这些 ownership semantics **无法从那几个字节本身推断出来**。
+
+同样：
+
+```cpp
+int fd;
+```
+
+在内存里就是一个整数，但语义上可能代表一个必须 `close()` 的 OS file descriptor。
+
+所以应始终区分：
+
+```text
+physical representation
+        │
+        │ 不能自动推出
+        ▼
+semantic ownership / protocol
+```
+
+这正是后面 `Rule of Zero` 与 RAII 的根本价值：
+
+> 把 ownership 从“隐藏在函数体和裸值里的程序员约定”，提升为“由成员类型明确表达的类型语义”。
 
 ---
 
-# 2. 先建立对象生命周期总图
+# 6. 构造与析构：让一块 storage 中的对象开始和结束生命
 
-一个对象的主要生命周期操作可以画成：
+现在重新看 constructor。
 
-```text
-                       对象 T
-                         │
-        ┌────────────────┼────────────────┐
-        │                │                │
-       创建           状态复制/转移         销毁
-        │                │                │
-  constructor       copy / move        destructor
-                         │
-                ┌────────┴────────┐
-                │                 │
-         construction        assignment
-          创建新对象           目标已存在
+```cpp
+class A {
+public:
+    A();
+    ~A();
+private:
+    std::string s;
+    int x;
+};
 ```
 
-这里已经包含了后面绝大多数规则的逻辑来源。
+## 6.1 Constructor 不是“先进入函数体，再创建成员”
 
-构造函数解决：
+实际上在 `A::A()` 的函数体执行之前，相关 base/member 子对象已经完成初始化。
 
-> **对象如何开始存在。**
+概念上：
 
-拷贝/移动解决：
+```text
+获得 A 的 storage
+        ↓
+构造 base subobjects
+        ↓
+构造 member subobjects
+        ↓
+进入 A::A() 函数体
+        ↓
+A 成为完成构造的对象
+```
 
-> **已有对象的值或资源如何复制、转移。**
+所以 member initializer list 的地位非常重要：它决定子对象应该怎样构造，而不是在函数体中“事后赋值”。
 
-析构解决：
+## 6.2 Destructor 是反方向的生命周期协议
 
-> **对象生命周期结束时，它负责的状态/资源如何收尾。**
+析构大致可以理解为：
 
-一个重要原则是：
+```text
+执行 ~A() 函数体
+        ↓
+销毁 member subobjects（逆序）
+        ↓
+销毁 base subobjects（逆序）
+        ↓
+A 的对象生命周期结束
+```
 
-> **C++ 不会分析函数体来猜测你的 ownership 语义；它主要根据类声明和成员/基类的类型能力来推导默认对象语义。**
-
-这一点后面会反复使用。
+因此 constructor / destructor 天然与对象的“子对象树”绑定。
 
 ---
 
-# 3. 构造函数应该怎样分类
+# 7. 为什么构造顺序和析构顺序由子对象结构决定
 
-“无参构造”和“带参构造”这种分类太粗，会把 copy/move constructor 混进去。
+考虑：
 
-更稳定的分类方式是：
+```cpp
+struct B1 {};
+struct B2 {};
+
+struct D : B1, B2 {
+    M1 m1;
+    M2 m2;
+};
+```
+
+忽略 virtual base 的额外规则，普通场景的初始化顺序可以理解为：
+
+```text
+B1
+↓
+B2
+↓
+m1
+↓
+m2
+↓
+D constructor body
+```
+
+注意：成员按照**声明顺序**初始化，不是按照 member-initializer-list 的书写顺序随意决定。
+
+销毁则反向：
+
+```text
+D destructor body
+↓
+m2
+↓
+m1
+↓
+B2
+↓
+B1
+```
+
+为什么必须反向？
+
+因为后构造的对象可能依赖先构造对象已经存在；反向销毁可以维持这种依赖关系直到最后一刻。
+
+这也是典型的 stack / RAII 生命周期结构。
+
+对于 virtual bases，最派生对象的构造还需要遵循 virtual-base 的专门初始化顺序；当前专题先抓住“对象是子对象组合，生命周期逐层建立/撤销”即可。
+
+---
+
+# 8. Constructor 应该怎样分类
+
+不要简单分成“无参构造”和“带参构造”，因为这会把 copy/move constructor 混在普通构造函数里。
+
+更稳定的分类是：
 
 ```text
 constructor
@@ -160,7 +496,6 @@ constructor
 ├── ordinary constructor
 │      A(int)
 │      A(std::string)
-│      A(int, double)
 │
 ├── copy constructor
 │      A(const A&)
@@ -169,155 +504,95 @@ constructor
        A(A&&)
 ```
 
-## 3.1 Default constructor
+## 8.1 Default constructor
 
-默认构造函数不是简单定义为“参数数量为 0”。
+它的关键不是“参数表一定为空”，而是可以在不提供实参时调用。
 
-更准确地说，它是**能够在不提供实参的情况下调用的构造函数**。
+```cpp
+A();
+A(int x = 0); // 也可以是 default constructor
+```
+
+## 8.2 Ordinary constructor
 
 例如：
 
 ```cpp
-class A {
-public:
-    A();
-};
+A(int);
 ```
 
-显然是 default constructor。
+它表达：
 
-下面这个同样可以是 default constructor：
+> **如何根据业务输入创建一个新的 A。**
+
+它不是特殊成员函数中的 copy/move protocol。
+
+## 8.3 Copy/move constructor
 
 ```cpp
-class A {
-public:
-    A(int x = 0);
-};
+A(const A&);
+A(A&&);
 ```
 
-因为：
-
-```cpp
-A a;
-```
-
-可以成立。
-
-## 3.2 Ordinary constructor
-
-例如：
-
-```cpp
-class A {
-public:
-    A(int);
-};
-```
-
-它要求提供参数，所以不是 default constructor。
-
-它的一个重要影响是：
-
-> **一旦类存在任意 user-declared constructor，编译器就不会再额外隐式声明普通 default constructor。**
-
-因此：
-
-```cpp
-class A {
-public:
-    A(int);
-};
-
-A a;       // error：没有 A()
-A b(10);   // OK
-```
-
-但 `A(int)` 本身不会直接抑制 copy/move/assignment/destructor。
-
-## 3.3 Copy/Move constructor 必须单独分类
-
-虽然：
-
-```cpp
-A(const A&)
-A(A&&)
-```
-
-从形式上也都是“带参数 constructor”，但它们属于特殊成员函数，会参与复杂的特殊成员函数生成规则。
-
-所以不要记：
+虽然都有参数，但它们描述的是：
 
 ```text
-“带参数 constructor 不影响 move”
+已有 A
+   ↓
+如何构造新的 A
 ```
 
-而要记：
-
-```text
-ordinary constructor 不直接抑制 implicit move
-copy/move constructor 则有专门规则
-```
+因此必须从 ordinary constructor 中单独拿出来理解。
 
 ---
 
-# 4. 六类特殊成员函数分别解决什么问题
-
-C++17 中，本专题最重要的六类特殊成员函数是：
+# 9. 六类特殊成员函数分别解决什么问题
 
 ```cpp
 class T {
 public:
-    T();                         // default constructor
-    T(const T&);                 // copy constructor
-    T(T&&);                      // move constructor
-
-    T& operator=(const T&);      // copy assignment
-    T& operator=(T&&);           // move assignment
-
-    ~T();                        // destructor
+    T();
+    T(const T&);
+    T(T&&);
+    T& operator=(const T&);
+    T& operator=(T&&);
+    ~T();
 };
 ```
 
-| 函数 | 核心问题 |
+| 函数 | 对象语义 |
 |---|---|
-| `T()` | 一个新对象怎样建立默认状态？ |
-| `T(const T&)` | 如何由已有对象复制出一个新对象？ |
-| `T(T&&)` | 如何由一个可被“消费”的对象构造新对象？ |
-| `operator=(const T&)` | 目标对象已经存在时，如何复制状态？ |
-| `operator=(T&&)` | 目标对象已经存在时，如何转移状态/资源？ |
-| `~T()` | 生命周期结束时如何收尾？ |
+| `T()` | 建立一个默认状态的新对象 |
+| `T(const T&)` | 从现有对象复制构造一个新对象 |
+| `T(T&&)` | 从可被消费状态的对象构造一个新对象 |
+| `operator=(const T&)` | 目标对象已存在，复制新的状态给它 |
+| `operator=(T&&)` | 目标对象已存在，把可转移状态交给它 |
+| `~T()` | 结束对象生命周期并完成资源收尾 |
 
-注意：ordinary constructor，例如 `T(int)`，是 constructor，但不是这里六个 special member functions 之一。
+`T(int)` 等 ordinary constructor 不属于这六项特殊成员函数。
 
 ---
 
-# 5. construction 与 assignment 为什么必须分开
+# 10. Construction 与 assignment 为什么必须分开
 
-下面两段代码看起来都像“把 a 给 b”，但语义不同。
-
-## 5.1 Copy construction
+## 10.1 Copy construction
 
 ```cpp
 T a;
 T b = a;
 ```
 
-这里 `b` 原先不存在。
+`b` 原来不存在。
 
-因此调用的是：
-
-```cpp
-T(const T&)
-```
-
-核心任务：
+核心语义：
 
 ```text
-创建一个新对象 b
-并让它拥有 a 的对应状态
+在 b 的 storage 中建立一个新 T
+↓
+用 a 的状态初始化 b 的子对象
 ```
 
-## 5.2 Copy assignment
+## 10.2 Copy assignment
 
 ```cpp
 T a;
@@ -325,183 +600,232 @@ T b;
 b = a;
 ```
 
-这里 `b` 已经存在。
+这里 `b` 已经是一个活着的完整对象。
 
-因此调用：
-
-```cpp
-T& operator=(const T&)
-```
-
-它比 copy construction 多了一个问题：
-
-> **b 原来已经拥有的状态/资源怎么办？**
-
-例如一个管理动态内存的类型，assignment 可能需要：
+因此 assignment 必须面对额外问题：
 
 ```text
-释放 b 的旧资源
-↓
-复制/获取 a 的新资源
-↓
-保证异常安全和自赋值行为
+b 原来的资源 / 状态怎么办？
 ```
 
-所以 construction 和 assignment 绝不能混为一个操作。
+例如：
+
+```text
+释放旧资源？
+复用旧 buffer？
+处理自赋值？
+如何保证异常安全？
+```
+
+所以：
+
+```text
+construction = 从无到有
+assignment   = 已有对象改变 value/resource state
+```
+
+绝不能混为一谈。
 
 ---
 
-# 6. 编译器为什么可以自动生成这些函数
+# 11. 默认 copy/move 为什么是逐子对象语义，而不是简单 memcpy
 
-对下面这种普通值类型：
+假设：
 
 ```cpp
-struct Record {
+struct Record : Base {
     std::string name;
     std::vector<int> values;
 };
 ```
 
-正确的 copy/move/destruction 语义通常可以机械地由成员组合出来。
-
-例如默认 copy 大致是：
+对普通非 union class，隐式定义的 copy constructor 概念上做的是：
 
 ```text
-copy name
-copy values
+copy Base subobject
+copy name subobject
+copy values subobject
 ```
 
-默认 move 大致是：
+而 move constructor 则概念上：
 
 ```text
-move name
-move values
+move Base subobject
+move name subobject
+move values subobject
 ```
 
-默认析构大致是：
+这叫 **memberwise copy/move**，但这里的 memberwise 应理解为广义的“bases + members 的逐子对象语义”。
+
+例如：
+
+```cpp
+Record r2 = r1;
+```
+
+不是一般性地等价于：
+
+```cpp
+std::memcpy(&r2, &r1, sizeof(Record)); // 一般不成立
+```
+
+因为：
+
+```cpp
+std::string
+std::vector<int>
+```
+
+内部有自己的不变量和资源协议。
+
+它们必须执行自己的 copy constructor。
+
+这直接给出一个极其重要的统一模型：
 
 ```text
-destroy values
-destroy name
+外层对象的默认 copy/move
+            ↓
+对子对象分别执行对应 copy/move
+            ↓
+子对象能力决定外层能力
 ```
 
-因此 C++ 的设计是：
-
-> **如果类声明没有表达冲突的特殊意图，编译器可以根据 base/member 的对应操作自动构造外层类的对象语义。**
-
-这是一种组合式设计：
-
-```text
-T 的默认生命周期语义
-=
-Base1 的语义
-+ Base2 的语义
-+ Member1 的语义
-+ Member2 的语义
-+ ...
-```
-
-现代 C++ 推荐把 ownership 封装到 `std::string`、`std::vector`、`std::unique_ptr`、`std::shared_ptr` 等 RAII 类型里，就是为了让这种组合推导安全可靠。
+后面的“base/member capability propagation”其实就是这一点的语言规则化。
 
 ---
 
-# 7. 理解规则前必须掌握的术语
+# 12. 值语义、所有权语义与 RAII
 
-很多 C++ 特殊成员函数题目之所以混乱，不是因为规则本身无法理解，而是因为以下术语被混用了。
+对象的字节布局只是底层载体；类型真正重要的是它表达什么语义。
 
-## 7.1 user-declared
+可以把常见类型粗分成：
 
-程序员在类接口中明确声明了函数。
-
-例如：
-
-```cpp
-class A {
-public:
-    ~A();
-};
-```
-
-是 user-declared destructor。
-
-下面同样是：
-
-```cpp
-class A {
-public:
-    ~A() = default;
-};
-```
-
-因为 `= default` 不等于“没有声明”。
-
-## 7.2 implicitly-declared
-
-程序员没写对应声明，但规则要求编译器替类声明该函数。
+## 12.1 Value type
 
 例如：
 
 ```cpp
-struct A {
-    int x;
-};
+std::string
+std::vector<int>
+Point
 ```
 
-只要规则允许，编译器会隐式声明 copy constructor 等函数。
+copy 通常意味着：
 
-注意：
+> 得到一个独立但等价的值。
+
+## 12.2 Unique ownership type
+
+例如：
+
+```cpp
+std::unique_ptr<T>
+```
+
+语义：
+
+```text
+copy  → 没有合理语义，禁止
+move  → 转移唯一所有权
+dtor  → 释放资源
+```
+
+## 12.3 Shared ownership type
+
+例如：
+
+```cpp
+std::shared_ptr<T>
+```
+
+语义：
+
+```text
+copy  → 增加共享所有权
+move  → 转移一个 handle
+dtor  → 减少引用计数
+```
+
+## 12.4 Non-owning type
+
+例如：
+
+```cpp
+T*
+std::string_view
+```
+
+通常表示观察/借用，不负责资源生命期。
+
+这些语义比成员在内存中占几个字节更重要。
+
+RAII 的核心就是：
+
+> **把资源 ownership 与对象 lifetime 绑定，并让这种语义由类型本身表达。**
+
+---
+
+# 13. 理解规则前必须掌握的术语
+
+## 13.1 user-declared
+
+程序员明确声明了函数。
+
+```cpp
+~A();
+~A() = default;
+~A() = delete;
+```
+
+以上都属于 user-declared destructor。
+
+所以：
+
+```text
+= default
+≠
+“我没有声明”
+```
+
+## 13.2 implicitly-declared
+
+程序员没写，但语言规则替类声明相应函数。
 
 ```text
 implicitly-declared
 ≠
-最终一定可调用
+最终一定能用
 ```
 
-它还可能在下一阶段变成 deleted。
+之后还可能成为 deleted。
 
-## 7.3 implicitly-defined
+## 13.3 implicitly-defined
 
-一个函数已经被隐式声明，并且在规则要求真正生成函数体时，编译器完成其定义。
+已经存在的 implicit/defaulted 函数，在需要真正生成语义时由编译器形成定义。
 
-因此要区分：
-
-```text
-声明阶段
-↓
-定义阶段
-↓
-调用阶段
-```
-
-## 7.4 defaulted
+## 13.4 defaulted
 
 ```cpp
-A(const A&) = default;
+A(A&&) = default;
 ```
 
 表示：
 
-> **这个函数由程序员明确要求存在，但实现采用语言规定的默认 memberwise/base-wise 语义。**
+> 请按照标准规定的 base/member 默认语义生成这个函数。
 
-它不是空函数。
-
-## 7.5 deleted
+## 13.5 deleted
 
 ```cpp
-A(const A&) = delete;
+A(A&&) = delete;
 ```
 
-表示：
+函数存在，但被禁止调用。
 
-> **这个函数被声明了，但禁止使用。**
+## 13.6 user-provided
 
-“deleted”与“根本不存在”对 overload resolution 的影响不同，这是后面的关键知识点。
+它比 user-declared 更细。
 
-## 7.6 user-provided
-
-这是比 user-declared 更细的术语。
-
-例如第一次声明时：
+例如类内第一次声明：
 
 ```cpp
 A() = default;
@@ -509,24 +833,9 @@ A() = default;
 
 是 user-declared，但通常不是 user-provided。
 
-而先声明：
+而先声明、之后在类外 `= default`，分类会有所不同，并会影响 triviality 等属性。
 
-```cpp
-class A {
-public:
-    A();
-};
-```
-
-再在类外：
-
-```cpp
-A::A() = default;
-```
-
-会落入不同的 user-provided 分类。
-
-这个区别会影响 triviality 等更深入属性。当前专题最重要的是先牢牢记住：
+当前专题只需记住：
 
 ```text
 user-declared
@@ -536,11 +845,13 @@ user-provided
 
 ---
 
-# 8. `= default` 的准确含义
+# 14. `= default`：显式选择编译器定义的默认对象语义
 
-`= default` 的设计价值是：
+为什么已经有隐式生成，还需要 `= default`？
 
-> **显式表达“我要这个函数作为类型接口的一部分，但它的实现采用默认语义”。**
+因为：
+
+> **“我要这个函数作为 API 存在”和“我要自己手写它的实现”是两回事。**
 
 例如：
 
@@ -551,9 +862,9 @@ public:
 };
 ```
 
-由于已经存在 user-declared constructor，编译器不会再隐式生成 `A()`。
+由于已经有 user-declared constructor，编译器不会再隐式给 `A()`。
 
-如果你确实希望保留 default construction，可以写：
+但如果设计上需要：
 
 ```cpp
 class A {
@@ -563,15 +874,15 @@ public:
 };
 ```
 
-这里表达的是：
+这表示：
 
 ```text
-A() 是 API 的一部分
+A() 是类型接口的一部分
 +
-它采用默认构造语义
+它采用编译器规定的默认子对象构造语义
 ```
 
-同样：
+同理：
 
 ```cpp
 A(const A&) = default;
@@ -581,36 +892,19 @@ A& operator=(A&&) = default;
 ~A() = default;
 ```
 
-都表示显式要求默认语义。
+都表示显式选择默认语义。
 
-但是：
+但：
 
-> **`= default` 仍然是 user-declared。**
+> **`= default` 不保证最终可用。**
 
-因此：
-
-```cpp
-class A {
-public:
-    ~A() = default;
-};
-```
-
-仍然存在 user-declared destructor，从而会影响 implicit move constructor / move assignment 的生成。
-
-另一个重要结论：
-
-> **`= default` 不保证函数最终可用。**
-
-如果 base/member 无法完成对应操作，这个 defaulted function 仍可能被定义为 deleted。
+如果某个 base/member 对应操作不可用，defaulted function 仍可能成为 deleted。
 
 ---
 
-# 9. `= delete` 的准确含义
+# 15. `= delete`：在类型系统里禁止某种对象操作
 
-`= delete` 表示一个函数存在于接口和候选集合中，但语言禁止调用它。
-
-例如：
+例如一个独占句柄：
 
 ```cpp
 class UniqueHandle {
@@ -620,60 +914,60 @@ public:
 };
 ```
 
-这里的设计意图是：
+这里不是“忘了实现 copy”。
+
+而是：
 
 ```text
-UniqueHandle 表达独占所有权
+copy 本身违反类型语义
 ↓
-copy 没有合理语义
-↓
-从类型系统层面禁止 copy
+从 API 层禁止表达这种操作
 ```
 
-这比“运行到某个地方再发现复制错误”更安全。
+所以 `= delete` 是一种类型设计工具。
 
-注意：`= delete` 不只可以用于特殊成员函数；它是更一般的函数接口控制机制。但本教材主要讨论它在 special member functions 中的用途。
+它和“函数根本不存在”也不同，因为显式 deleted function 仍然会参与 overload resolution。
 
 ---
 
-# 10. 第一阶段：特殊成员函数的隐式声明与抑制关系
+# 16. 特殊成员函数第一阶段：声明与抑制关系
 
-接下来进入最容易混乱的地方。
+现在进入最容易被背成口诀的部分。
 
-首先必须明确：所谓“某函数影响另一个函数”，可能是三种完全不同的机制。
-
-```text
-1. S：目标函数根本不再 implicitly declared
-
-2. D：目标函数仍 implicitly declared
-      但由于当前声明关系被 defined as deleted
-
-3. P：目标 copy 操作仍可 implicit/defaulted
-      但 C++17 已将这种依赖组合标为 deprecated
-```
-
-因此不能简单使用一个 `×` 表示“不能用”。
-
-此外还需要：
+先明确：语言不会打开 constructor 函数体去研究：
 
 ```text
-SELF：这个函数已经由用户自己声明
-✓：当前声明对目标函数没有直接第一阶段影响
+有没有 new？
+有没有 malloc？
+有没有 open？
+是不是 owner？
 ```
 
-注意：
+特殊成员函数生成规则是 **declaration-driven** 的。
+
+也就是说，第一阶段只看：
 
 ```text
-✓ ≠ 最终一定可调用
+类声明了哪些 constructor / copy / move / assignment / destructor？
 ```
 
-它只意味着第一阶段没有被当前声明直接关闭。
+然后根据固定标准规则决定其余特殊成员函数是否 implicit declaration。
+
+这里有三种完全不同的后果：
+
+```text
+S：目标函数根本不 implicitly declared
+D：目标函数 implicitly declared，但因 move 声明关系 defined as deleted
+P：目标 copy 仍可 defaulted，但该隐式定义组合在 C++17 中已 deprecated
+```
+
+不能把它们统一写成一个“×”。
 
 ---
 
-# 11. 完整二维关系表
+# 17. 完整二维关系表
 
-为了避免“带参数构造函数”造成歧义，这里额外加入 `OtherCtor`（普通非 copy/move constructor）。
+为避免“带参数 constructor”的歧义，把普通非 copy/move constructor 单独记为 `OtherCtor`。
 
 | 已 user-declared ↓ / 目标 implicit → | DfltCtor | CopyCtor | MoveCtor | CopyAssign | MoveAssign | Dtor |
 |---|---:|---:|---:|---:|---:|---:|
@@ -690,81 +984,24 @@ SELF：这个函数已经由用户自己声明
 | 符号 | 含义 |
 |---|---|
 | `SELF` | 该函数已经由用户声明 |
-| `S` | Suppressed：目标函数根本不隐式声明 |
+| `S` | Suppressed：目标函数根本不会被隐式声明 |
 | `D` | 目标函数会隐式声明，但被定义为 deleted |
-| `P` | C++17 中仍可默认生成，但属于 deprecated implicit-copy 组合 |
-| `✓` | 当前这一项对目标没有直接第一阶段影响 |
+| `P` | C++17 中该 implicit copy 组合仍存在，但其隐式定义属于 deprecated |
+| `✓` | 当前声明对目标没有第一阶段的直接关闭作用 |
 
-这张表只解决：
+注意：
 
-> **根据 class declaration，编译器在第一阶段怎样建立 special member function 集合。**
+```text
+✓ ≠ 最终一定可调用
+```
 
-它不是“类型最终支持哪些操作”的最终答案。
+第二阶段还要检查所有 base/member。
 
 ---
 
-# 12. 逐行解释二维表为什么这样设计
+# 18. 为什么这张表必须区分 S、D、P
 
-## 12.1 DfltCtor 行
-
-```cpp
-class A {
-public:
-    A() = default;
-};
-```
-
-对应：
-
-```text
-DfltCtor → SELF
-其他五项 → ✓
-```
-
-原因是 default constructor 主要表达：
-
-> **一个新对象怎样从无到有。**
-
-它本身没有声明 copy/move/assignment/destruction 的特殊策略。
-
-因此它不直接抑制这些操作。
-
-这里必须避免一个错误直觉：
-
-```text
-“只要程序员写了 constructor，编译器就不再生成 move”
-```
-
-这是错的。
-
-## 12.2 OtherCtor 行
-
-```cpp
-class A {
-public:
-    A(int);
-};
-```
-
-`A(int)` 是 user-declared constructor，因此：
-
-```text
-implicit A() → S
-```
-
-但它不是 copy/move protocol 的组成部分，所以：
-
-```text
-CopyCtor   ✓
-MoveCtor   ✓
-CopyAssign ✓
-MoveAssign ✓
-Dtor       ✓
-```
-
-从设计上看，它仍主要描述“新对象如何创建”。
-
-## 12.3 CopyCtor 行
+## 18.1 S：函数不存在于 implicit candidate set 中
 
 ```cpp
 class A {
@@ -773,26 +1010,23 @@ public:
 };
 ```
 
-首先，copy constructor 自己也是 constructor，所以：
+这里没有 implicit move constructor。
 
-```text
-implicit default ctor → S
+因此：
+
+```cpp
+A b = std::move(a);
 ```
 
-其次，C++ 不再隐式声明 move constructor / move assignment：
+仍可能由：
 
-```text
-MoveCtor   → S
-MoveAssign → S
+```cpp
+A(const A&)
 ```
 
-原因不是编译器分析到你“在管理资源”，而是：
+接住 xvalue 并发生 copy。
 
-> **类作者已经明确介入了对象之间的复制协议；语言不再自动假设 move 协议应该存在。**
-
-CopyAssign 仍可默认生成，但 C++17 把依赖这种组合的 implicit copy 定义为 deprecated 方向，因此表中为 `P`。
-
-## 12.4 MoveCtor 行
+## 18.2 D：函数存在，但不可用
 
 ```cpp
 class A {
@@ -801,77 +1035,20 @@ public:
 };
 ```
 
-它也是 constructor，因此：
+implicit copy constructor 会被定义为 deleted。
+
+这是：
 
 ```text
-DfltCtor → S
+函数存在
+但禁止使用
 ```
 
-如果类显式声明 move constructor，则隐式 copy constructor 和隐式 copy assignment 会被定义为 deleted：
+不是“根本没有”。
 
-```text
-CopyCtor   → D
-CopyAssign → D
-```
+## 18.3 P：兼容历史，但设计上不要继续依赖
 
-同时不会再额外隐式声明 move assignment：
-
-```text
-MoveAssign → S
-```
-
-这个组合体现了一个重要的语言设计：
-
-> 当类型明确表达“可移动”但没有明确表达“可复制”时，语言不会擅自假设 copy 仍然正确。
-
-这非常适合 unique ownership 类型。
-
-## 12.5 CopyAssign 行
-
-```cpp
-class A {
-public:
-    A& operator=(const A&);
-};
-```
-
-它不是 constructor，所以不影响 implicit default ctor。
-
-但它表示类作者已经介入对象之间的复制/替换协议，因此：
-
-```text
-MoveCtor   → S
-MoveAssign → S
-```
-
-CopyCtor 仍可能存在，但这种 implicit copy 组合在 C++17 中属于 deprecated 方向，所以为 `P`。
-
-## 12.6 MoveAssign 行
-
-```cpp
-class A {
-public:
-    A& operator=(A&&);
-};
-```
-
-它不是 constructor，因此：
-
-```text
-DfltCtor → ✓
-```
-
-但 move assignment 的声明会使：
-
-```text
-CopyCtor   → D
-CopyAssign → D
-MoveCtor   → S
-```
-
-也就是说，类型已经明确表达 move-side 语义时，语言不会默认保留 copy-side 语义。
-
-## 12.7 Dtor 行
+例如：
 
 ```cpp
 class A {
@@ -880,89 +1057,442 @@ public:
 };
 ```
 
-destructor 不属于 constructor，因此不影响 implicit default ctor。
+C++17 下 implicit copy 仍可能存在，但“自己声明 destructor，却继续依赖 implicit copy”的组合属于 deprecated implicit-copy 方向。
 
-但 user-declared destructor 会使：
+它与 Rule of Three 的设计背景高度一致。
+
+---
+
+# 19. 逐行解释抑制矩阵
+
+这里的“原因”必须区分两层：
+
+```text
+规范层：标准明确规定这些 declaration conditions
+设计直觉层：这些规则大体围绕对象复制/转移/销毁协议形成
+```
+
+不要把设计直觉误当成“编译器理解 ownership”。
+
+## 19.1 DfltCtor
+
+```cpp
+A() = default;
+```
+
+它表达：
+
+```text
+如何建立一个默认状态的新对象
+```
+
+本身不直接定制已有对象之间的 copy/move/assignment，也不定制 destruction。
+
+所以其它五类目标均不因它直接关闭。
+
+## 19.2 OtherCtor
+
+```cpp
+A(int);
+```
+
+它是 user-declared constructor，所以：
+
+```text
+implicit A() → S
+```
+
+但它仍主要是“新对象如何建立”的协议，不直接关闭 copy/move/assignment/dtor。
+
+## 19.3 CopyCtor
+
+```cpp
+A(const A&);
+```
+
+首先它本身是 constructor：
+
+```text
+implicit A() → S
+```
+
+其次，根据 C++17 规则：
+
+```text
+implicit MoveCtor   → S
+implicit MoveAssign → S
+```
+
+CopyAssign 仍可 defaulted，但对应 implicit-copy 组合属于 `P`。
+
+## 19.4 MoveCtor
+
+```cpp
+A(A&&);
+```
+
+因为是 constructor：
+
+```text
+DfltCtor → S
+```
+
+同时：
+
+```text
+implicit CopyCtor   → D
+implicit CopyAssign → D
+implicit MoveAssign → S
+```
+
+这是 C++11 后 move-side 声明对 copy-side 默认能力的明确影响。
+
+## 19.5 CopyAssign
+
+```cpp
+A& operator=(const A&);
+```
+
+它不属于 constructor，所以：
+
+```text
+DfltCtor → ✓
+```
+
+但：
+
+```text
+MoveCtor   → S
+MoveAssign → S
+CopyCtor   → P
+```
+
+## 19.6 MoveAssign
+
+```cpp
+A& operator=(A&&);
+```
+
+它会：
+
+```text
+CopyCtor   → D
+CopyAssign → D
+MoveCtor   → S
+```
+
+但不影响 implicit default constructor。
+
+## 19.7 Destructor
+
+```cpp
+~A();
+```
+
+它不会关闭 default constructor，但会：
 
 ```text
 MoveCtor   → S
 MoveAssign → S
 ```
 
-而 copy constructor / copy assignment 在 C++17 中仍可存在，但这种“自己声明析构、继续依赖隐式 copy”的模式属于 deprecated 方向，因此表中为 `P`。
+CopyCtor / CopyAssign 在 C++17 中仍可能存在，但属于 `P`。
 
-这也是 Rule of Three / Five 的历史背景之一。
+这里可以得到一个重要认识：
+
+> user-declared destructor 对 move 的影响是**声明规则**，不是因为编译器分析出 destructor 里面正在 `delete` 某个资源。
 
 ---
 
-# 13. 第二阶段：base/member 能力如何传播到外层类
+# 20. 第二阶段：base/member 能力如何传播到外层对象
 
-二维表只回答“第一阶段是否声明”。
+二维表只解决第一阶段：
 
-接下来编译器还要问：
+```text
+这个函数会不会被 implicit/defaulted 地建立？
+```
 
-> **如果我要 default/copy/move/assign/destruct 一个 T，它的 base/member 对应操作是否成立？**
+接下来必须回到对象模型。
 
-例如：
+假设：
 
 ```cpp
-class M {
-public:
+struct B {};
+
+struct M {
     M(M&&) = delete;
 };
 
-class A {
+struct A : B {
     M m;
 };
 ```
 
-从 `A` 自身声明看，它没有 user-declared copy/move/destructor，所以第一阶段允许考虑 implicit move constructor。
-
-但生成：
-
-```cpp
-A(A&&)
-```
-
-时，需要处理：
-
-```cpp
-m
-```
-
-这就要求找到可用的：
-
-```cpp
-M(M&&)
-```
-
-而它被 delete。
-
-因此 `A` 的默认 move 也会受到影响。
-
-这种传播可以统一理解为：
+`A` 在语义上包含：
 
 ```text
-T 能 default construct
-  ← bases/members 能否完成所需 default initialization
-
-T 能 copy construct
-  ← bases/members 能否 copy construct
-
-T 能 move construct
-  ← bases/members 对 xvalue 初始化能否找到可用构造路径
-
-T 能 copy assign
-  ← bases/members 能否 copy assign
-
-T 能 move assign
-  ← bases/members 能否 move assign
-
-T 能 destruct
-  ← bases/members 是否可析构
+A complete object
+├── B base subobject
+└── M member subobject m
 ```
 
-## 13.1 `= default` 也必须经过这一层
+如果编译器尝试 default move `A`：
+
+```text
+move B
+move m
+```
+
+那么对 `m` 必须找到一个可用的初始化路径。
+
+如果对应操作不可用，A 的 defaulted move 可能被定义为 deleted。
+
+所以能力传播模型是：
+
+```text
+T default constructible
+  ← 所需 bases/members 能建立初始状态
+
+T copy constructible
+  ← bases/members 可执行相应 copy construction
+
+T move constructible
+  ← bases/members 从 xvalue 能完成相应 construction
+
+T copy assignable
+  ← bases/members 可完成 copy assignment
+
+T move assignable
+  ← bases/members 可完成 move assignment
+
+T destructible
+  ← bases/members 都可被销毁
+```
+
+这不是一组独立口诀，而是对象子结构的直接结果。
+
+## 20.1 const/reference member 为什么常使 assignment 被 deleted
+
+```cpp
+struct A {
+    const int x = 0;
+};
+```
+
+`A` 已经存在后，对 `x` 没有普通“重新赋值”的语义，所以默认 assignment 会受限制。
+
+再如：
+
+```cpp
+struct A {
+    int& ref;
+};
+```
+
+reference 绑定后不能通过 assignment 让引用本身重新绑定，因此外层默认 assignment 同样受影响。
+
+从对象模型看，这并不神秘：
+
+```text
+外层 assignment
+↓
+要求每个子对象完成对应 assignment
+↓
+某个子对象语义不成立
+↓
+外层 defaulted assignment 不能成立
+```
+
+---
+
+# 21. 第三阶段：具体调用点还要经过 overload resolution
+
+类的特殊成员函数集合确定以后，还不能直接说“这一行一定 move”。
+
+例如：
+
+```cpp
+A a;
+A b = std::move(a);
+```
+
+需要依次问：
+
+```text
+A(A&&) 存在吗？
+A(const A&) 存在吗？
+各自可用吗？
+当前参数是什么 value category？
+哪个 conversion sequence 更好？
+最佳候选是否 deleted / inaccessible？
+```
+
+所以完整分析有三层：
+
+```text
+第一层：class declaration
+        ↓
+哪些 special members 被 declared？
+
+第二层：object composition
+        ↓
+这些 defaulted operations 是否可成立？
+
+第三层：call expression
+        ↓
+overload resolution
+        ↓
+最终 copy / move / error
+```
+
+---
+
+# 22. `std::move` 与对象语义：它并不移动内存
+
+最常见误解：
+
+```text
+std::move(a)
+→ 把 a 的内存移动走
+```
+
+错误。
+
+`std::move` 本质上是一个 value-category cast，近似理解为：
+
+```cpp
+static_cast<T&&>(a)
+```
+
+它做的是：
+
+```text
+把表达式标记成“可以按右值语义参与重载”
+```
+
+而不是：
+
+```text
+memcpy
+改变对象地址
+结束源对象 lifetime
+自动转移任何资源
+```
+
+真正资源如何转移，由最终选中的 move constructor / move assignment 及其成员操作决定。
+
+例如：
+
+```cpp
+std::vector<int> v2 = std::move(v1);
+```
+
+常见实现会转移内部 buffer ownership，但：
+
+```text
+v1 对象本身仍在原地址
+v1 lifetime 仍继续
+之后仍会执行 v1 destructor
+```
+
+所以 move 应理解为：
+
+> **改变/转移对象所代表的 value/resource state，而不是把对象实体的 storage 搬到别处。**
+
+---
+
+# 23. 为什么有名字的 `T&&` 是 lvalue expression
+
+```cpp
+void g(A&& x) {
+    f(x);
+    f(std::move(x));
+}
+```
+
+`x` 的 declared type 是：
+
+```cpp
+A&&
+```
+
+但表达式：
+
+```cpp
+x
+```
+
+是 lvalue。
+
+可以从对象 identity 理解：
+
+> 一旦对象可以通过一个名字稳定定位，这个名字表达的是“这个有身份的对象”。
+
+所以：
+
+```cpp
+f(x);            // 按 lvalue
+f(std::move(x)); // 显式转换成 xvalue
+```
+
+这也是 move constructor 内部经常必须写：
+
+```cpp
+A(A&& other)
+    : member(std::move(other.member))
+{}
+```
+
+的原因。
+
+---
+
+# 24. Move 不存在、显式 deleted、defaulted 后 deleted
+
+这三种情况必须分开。
+
+## 24.1 Move 根本不存在
+
+```cpp
+class A {
+public:
+    A(const A&);
+};
+```
+
+user-declared copy constructor 抑制 implicit move constructor。
+
+于是：
+
+```cpp
+A b = std::move(a);
+```
+
+可能由 `A(const A&)` 接住右值并 copy。
+
+## 24.2 显式 move = delete
+
+```cpp
+class A {
+public:
+    A(const A&);
+    A(A&&) = delete;
+};
+```
+
+`A(A&&)` 仍然进入 overload resolution，而且对 xvalue 通常匹配更好。
+
+如果它被选中：
+
+```text
+best candidate = deleted
+↓
+compile error
+```
+
+不会自动退回第二名 copy constructor。
+
+## 24.3 Defaulted move 因子对象能力失败而成为 deleted
 
 ```cpp
 class A {
@@ -973,366 +1503,29 @@ private:
 };
 ```
 
-并不表示：
+如果编译器按照子对象规则无法形成 A 的 move constructor，它可能被定义为 deleted。
 
-```text
-“我写了 = default，所以 move 一定可用”
-```
-
-更准确是：
-
-```text
-我要求一个 defaulted move ctor
-↓
-编译器按 base/member 规则尝试生成
-↓
-若组合语义不成立
-↓
-该函数可能成为 deleted
-```
-
-## 13.2 assignment 对 const/reference 成员尤其敏感
-
-例如：
-
-```cpp
-struct A {
-    const int x = 0;
-};
-```
-
-对 `x` 做重新赋值没有普通可写语义，因此默认 assignment 能力会受到限制。
-
-又例如 reference member：
-
-```cpp
-struct A {
-    int& ref;
-};
-```
-
-引用一旦绑定，并不存在普通“让引用自身重新绑定”的 assignment 语义，因此默认 assignment 同样容易成为 deleted。
-
-不要把这些现象背成孤立规则；它们仍然可以放进：
-
-```text
-外层操作
-↓
-要求每个 base/member 完成对应操作
-↓
-某个成员对应操作不成立
-↓
-外层 defaulted/implicit 操作不能成立
-```
-
----
-
-# 14. 第三阶段：具体调用点还要经过重载决议
-
-即使知道类里有哪些 special member functions，也还没有结束。
-
-例如：
-
-```cpp
-A a;
-A b = std::move(a);
-```
-
-真正需要问：
-
-```text
-有哪些候选 constructor？
-↓
-每个候选是否可行？
-↓
-哪个 conversion sequence 更好？
-↓
-最佳候选是否 deleted / accessible？
-```
-
-所以完整模型是：
-
-```text
-第一阶段：class declaration
-    ↓
-哪些 special member 被 declared？
-
-第二阶段：base/member capabilities
-    ↓
-这些 implicit/defaulted 函数是否 deleted？
-
-第三阶段：call expression
-    ↓
-overload resolution
-    ↓
-最终调用 copy / move / 报错
-```
-
-这是整个专题最值得长期使用的推导框架。
-
----
-
-# 15. `std::move` 到底做了什么
-
-最容易形成的错误直觉是：
-
-```text
-std::move(x)
-→ 调用 move constructor
-```
-
-这是错的。
-
-`std::move` 的核心作用近似可以理解为：
-
-```cpp
-static_cast<T&&>(x)
-```
-
-也就是：
-
-> **把表达式转换为适合参与右值重载匹配的值类别（通常是 xvalue）。**
-
-它本身不搬任何资源，也不直接调用 constructor。
-
-真正调用谁仍然由 overload resolution 决定。
-
-例如：
-
-```cpp
-class A {
-public:
-    A(const A&) { /* copy */ }
-};
-
-A a;
-A b = std::move(a);
-```
-
-这里由于 user-declared copy constructor 抑制了 implicit move constructor，候选中可能只有：
-
-```cpp
-A(const A&)
-```
-
-而 `const A&` 可以绑定右值，所以最终仍然 copy。
-
-因此正确判断链是：
-
-```text
-std::move(a)
-    ↓
-产生 xvalue
-    ↓
-检查 A(A&&) 是否存在且可用
-    ↓
-如果没有，A(const A&) 是否可接？
-    ↓
-进入正常 overload resolution
-```
-
----
-
-# 16. 有名字的右值引用为什么仍是左值表达式
-
-看：
-
-```cpp
-void g(A&& x) {
-    f(x);
-    f(std::move(x));
-}
-```
-
-虽然变量 `x` 的声明类型是：
-
-```cpp
-A&&
-```
-
-但是表达式：
-
-```cpp
-x
-```
-
-是 lvalue。
-
-原因可以从语言语义理解：
-
-> **一旦一个对象有了名字，你就可以稳定地通过这个名字再次定位它；这个名字表达的是一个有身份的对象。**
-
-因此：
-
-```cpp
-f(x);
-```
-
-按左值参与重载。
-
-而：
-
-```cpp
-f(std::move(x));
-```
-
-才重新把它转换成 xvalue。
-
-这也是为什么 move constructor 内部经常写：
-
-```cpp
-A(A&& other)
-    : member(std::move(other.member))
-{}
-```
-
-`other` 虽然类型是 `A&&`，但 `other.member` 通过有名字对象访问时不会自动保持“右值属性”。
-
----
-
-# 17. move 不存在、move 被 delete、defaulted move 被 delete：三者必须区分
-
-这是中高级 C++ 中非常重要的一组区别。
-
-## 17.1 情况一：move 根本不存在
-
-```cpp
-class A {
-public:
-    A(const A&);
-};
-```
-
-由于 user-declared copy constructor：
-
-```text
-implicit A(A&&) → 不再声明
-```
-
-于是：
-
-```cpp
-A b = std::move(a);
-```
-
-如果 `A(const A&)` 可用，则可能直接由 copy constructor 接住右值。
-
-## 17.2 情况二：move 被程序员显式 delete
-
-```cpp
-class A {
-public:
-    A(const A&);
-    A(A&&) = delete;
-};
-```
-
-对：
-
-```cpp
-A b = std::move(a);
-```
-
-`A(A&&)` 通常是更好的匹配。
-
-overload resolution 先选中它，然后发现：
-
-```text
-selected function is deleted
-```
-
-于是编译失败。
-
-**不会因为第一名 deleted 就退回第二名 copy constructor。**
-
-## 17.3 情况三：implicitly-declared / explicitly-defaulted move 在生成时成为 deleted
-
-这是一条容易忽略的特殊规则。
-
-如果 defaulted move constructor 因为 base/member 原因被定义为 deleted，C++ 会把这种 deleted move constructor 从 overload resolution 中忽略，以避免它阻止从右值走 copy 路径。
-
-move assignment 也有类似设计。
+C++ 对这种 **defaulted move constructor becomes deleted** 有专门的 overload-resolution 处理：它会被忽略，以免阻止从右值走可用的 copy 路径。
 
 所以：
 
 ```text
-explicit T(T&&) = delete
+explicit A(A&&) = delete
 ```
 
 和：
 
 ```text
-defaulted T(T&&)
-因为成员能力而 becomes deleted
+defaulted A(A&&) 因生成失败成为 deleted
 ```
 
-不是完全相同的 overload 行为。
-
-这是为什么我们必须精确区分“显式 delete”和“默认生成失败”。
+不能简单视为同一种候选行为。
 
 ---
 
-# 18. 析构函数与资源所有权
+# 25. 为什么 constructor 中 `new` 不会改变隐式生成规则
 
-析构函数解决：
-
-> **对象生命周期结束时，需要执行哪些收尾动作？**
-
-如果成员本身是 RAII 类型：
-
-```cpp
-class A {
-    std::string s;
-    std::vector<int> v;
-};
-```
-
-通常不需要自己写 destructor。
-
-编译器生成的析构流程会递归调用成员析构：
-
-```text
-~A
-↓
-destroy v
-↓
-destroy s
-```
-
-如果自己直接管理裸资源：
-
-```cpp
-class Buffer {
-public:
-    Buffer() : p(new int[100]) {}
-    ~Buffer() { delete[] p; }
-
-private:
-    int* p;
-};
-```
-
-那么 destructor 已经明确介入资源生命周期。
-
-此时默认浅 copy：
-
-```text
-a.p ----┐
-        ├── same allocation
-b.p ----┘
-```
-
-就可能导致 double delete。
-
-因此“自己需要 destructor”通常是一个很强的信号：copy/move 语义也需要重新设计。这就是 Rule of Three/Five 的来源。
-
----
-
-# 19. 为什么“默认构造函数里 `new` 了内存”不会改变隐式 move 规则
-
-这是理解语言设计哲学的关键问题。
-
-看：
+考虑：
 
 ```cpp
 class A {
@@ -1340,53 +1533,53 @@ public:
     A() {
         p = new int[100];
     }
-
 private:
     int* p;
 };
 ```
 
-从程序员语义看，这显然可能是在获取资源。
+从业务语义看，它似乎在“管理资源”。
 
-但 C++ **不会分析函数体里是否出现 `new`** 来决定 copy/move 是否生成。
+为什么 C++ 不因此自动关闭 copy/move？
 
-原因有三层。
+答案就在“内存布局 vs 对象语义”的区别。
 
-## 19.1 `new` 不足以表达 ownership
+## 25.1 编译器无法从 `new` 推断 ownership
 
 ```cpp
 p = pool.allocate();
 ```
 
-编译器无法仅凭这一行知道：
+可能表示：
 
 ```text
-p 是独占 owner？
-p 是共享 handle？
-p 只是 borrowed pointer？
-资源由 pool 释放？
-资源由 A 释放？
+unique ownership
+shared handle
+borrowed memory
+pool-owned resource
 ```
 
-## 19.2 没有 `new` 也可能拥有资源
+函数体本身不足以形成稳定类型规则。
+
+## 25.2 没有 `new` 也可能拥有资源
 
 ```cpp
 int fd;
 ```
 
-可能只是普通整数，也可能是必须 `close(fd)` 的文件描述符。
+可能是 OS file descriptor。
 
 ```cpp
 uint64_t handle;
 ```
 
-可能是普通数值，也可能代表 GPU/OS 资源。
+可能是 GPU / kernel resource handle。
 
-资源所有权是一种**程序语义**，不是靠简单语法扫描能够可靠恢复的属性。
+所以“资源”是程序语义，不是简单语法模式。
 
-## 19.3 C++ 需要 declaration-driven、可局部推导的规则
+## 25.3 Separate compilation 也要求 declaration-driven 规则
 
-在头文件中：
+头文件：
 
 ```cpp
 class A {
@@ -1397,11 +1590,11 @@ private:
 };
 ```
 
-构造函数实现可能在另一个 `.cpp` 文件。
+实现可能在另一个 `.cpp`。
 
-其他 translation unit 不应该先分析 `A::A()` 函数体，才能决定 `A` 有没有 move constructor。
+其他 translation unit 不应该先分析 `A::A()` 函数体，才能知道 A 有没有 move constructor。
 
-因此 C++ 采用：
+因此语言选择：
 
 ```text
 class declaration
@@ -1409,147 +1602,160 @@ class declaration
 base/member type capabilities
 ```
 
-来建立特殊成员函数规则。
+作为特殊成员函数规则的事实来源。
 
-所以更准确的设计结论是：
+所以最准确的结论是：
 
-> **特殊成员函数自动生成机制不是资源检测机制，而是基于类声明和组成类型能力的对象语义协议推导机制。**
-
-这也是现代 C++ 强调“让 ownership 体现在类型里”的原因。
-
-例如：
-
-```cpp
-class A {
-    std::unique_ptr<int[]> p;
-};
-```
-
-`unique_ptr` 自身明确表达：
-
-```text
-copy  → prohibited
-move  → supported
-Dtor  → release resource
-```
-
-于是 `A` 的能力可以由成员类型自动传播，而不用编译器猜裸指针的含义。
+> **特殊成员函数自动生成机制不是“资源检测器”，而是一个基于类声明和对象子结构的语义组合机制。**
 
 ---
 
-# 20. Rule of Three / Five / Zero
+# 26. Rule of Three / Five / Zero
 
-这些不是“标准强制你必须写几个函数”的语法规则，而是从资源语义和特殊成员函数生成规则总结出来的设计经验。
+这些是设计经验，不是“标准要求必须写几个函数”。
 
-## 20.1 Rule of Three
+## 26.1 Rule of Three
 
-经典 C++ 中，如果一个类需要自己定义以下任意一个：
+如果一个类需要自定义：
 
 ```text
-Destructor
+Dtor
 CopyCtor
 CopyAssign
 ```
 
-通常意味着它直接管理某种资源，因此另外两个也需要认真设计。
+中的一个，往往意味着它的 copy/lifetime semantics 不再是普通 memberwise 默认语义，因此另外两个也值得重新审视。
 
-例如：
+## 26.2 Rule of Five
+
+C++11 加入 move 后，需要进一步考虑：
+
+```text
+MoveCtor
+MoveAssign
+```
+
+于是资源管理类要审视完整的五项协议。
+
+这不是鼓励“每个类都手写五个”，恰恰相反。
+
+## 26.3 Rule of Zero
+
+更现代的做法是：
 
 ```cpp
 class Buffer {
-    char* p;
+    std::vector<char> data;
 };
 ```
 
-如果 destructor 要：
+或者：
 
 ```cpp
-delete[] p;
-```
-
-那么默认 copy 只复制地址通常不正确。
-
-所以需要同时考虑：
-
-```text
-deep copy？
-禁止 copy？
-共享所有权？
-```
-
-## 20.2 Rule of Five
-
-C++11 引入 move semantics 后，还要考虑：
-
-```text
-MoveCtor
-MoveAssign
-```
-
-于是资源管理型类的完整协议扩展到五项：
-
-```text
-CopyCtor
-CopyAssign
-MoveCtor
-MoveAssign
-Dtor
-```
-
-特别是：user-declared destructor/copy 操作会抑制隐式 move，因此如果类型确实应该高效移动，往往需要明确表达 move 语义。
-
-## 20.3 Rule of Zero
-
-现代 C++ 更推荐：
-
-> **业务类尽量不要直接管理裸资源，让成员类型自己承担资源所有权。**
-
-例如：
-
-```cpp
-class Document {
-    std::string name;
-    std::vector<int> data;
-    std::unique_ptr<Resource> resource;
+class ResourceHolder {
+    std::unique_ptr<Resource> p;
 };
 ```
 
-通常无需手写五个特殊成员函数。
+让成员类型直接表达 ownership。
 
-外层类的 copy/move/destruct 能力由成员自动推导：
-
-```text
-string      → copy + move
-vector      → copy + move
-unique_ptr  → no copy + move
-```
-
-因此 `Document` 会自然获得与成员组合一致的对象语义。
-
-这就是 Rule of Zero：
+于是外层类的默认对象语义可以自然组合：
 
 ```text
-资源管理下沉到专门 RAII 类型
-↓
-业务类型只组合这些类型
-↓
-尽量使用编译器生成的特殊成员函数
+vector       → copy + move + destroy
+unique_ptr   → no copy + move + destroy
 ```
+
+外层类型不必重复实现资源协议。
+
+这就是 Rule of Zero。
 
 ---
 
-# 21. C++17 拷贝消除：不要机械地数 copy/move
+# 27. 多态对象、vptr 与 virtual destructor
+
+讨论对象内存布局时，很容易听到：
+
+```text
+“有 virtual function 的对象里一定有一个 vptr。”
+```
+
+工程实践中，主流 ABI 确实通常通过 vptr/vtable 实现动态分派。
+
+但必须区分：
+
+```text
+C++ language semantics
+vs
+ABI implementation technique
+```
+
+标准要求的是：
+
+> 对 polymorphic object，运行时必须能够实现规定的动态类型/虚函数语义。
+
+标准并不要求所有实现必须以某个固定字段名为 `vptr` 的方式布局对象。
+
+所以教材中可以画典型实现：
+
+```text
+Derived object（典型 ABI 示意）
+┌─────────────┐
+│ vptr ?      │  implementation detail
+├─────────────┤
+│ Base part   │
+├─────────────┤
+│ members     │
+└─────────────┘
+```
+
+但不能把这个图当成 C++ 标准保证的唯一布局。
+
+## 27.1 为什么 polymorphic base 常需要 virtual destructor
+
+```cpp
+Base* p = new Derived;
+delete p;
+```
+
+如果 Base destructor 不是 virtual，而通过 Base* 删除动态类型为 Derived 的对象，会落入未定义行为。
+
+正确的 polymorphic base 通常写：
+
+```cpp
+class Base {
+public:
+    virtual ~Base() = default;
+};
+```
+
+这样 destruction 可以沿动态类型正确执行：
+
+```text
+Derived::~Derived()
+↓
+Base::~Base()
+```
+
+但别忘了：
+
+```cpp
+virtual ~Base() = default;
+```
+
+仍然是 **user-declared destructor**。
+
+因此会影响 implicit move generation。
+
+这正是对象模型、多态语义与特殊成员规则相互连接的地方。
+
+---
+
+# 28. C++17 Copy elision：对象甚至可能直接在最终 storage 中产生
 
 考虑：
 
 ```cpp
-class A {
-public:
-    A();
-    A(const A&);
-    A(A&&);
-};
-
 A make() {
     return A{};
 }
@@ -1557,17 +1763,25 @@ A make() {
 A a = make();
 ```
 
-如果按照“先创建临时对象，再 move，再 move”的旧直觉，很容易错误地数出多个移动构造。
+不要画成：
 
-C++17 对这种 prvalue 场景提供 guaranteed copy elision 语义：
-
-```cpp
-return A{};
+```text
+临时 A
+↓ move
+返回值 A
+↓ move
+a
 ```
 
-可以直接构造最终目标对象，不需要存在那些中间 copy/move 操作。
+在 C++17 对应的 guaranteed copy-elision / prvalue 语义下，可以把它理解为：
 
-因此甚至：
+```text
+最终对象 a 的 storage
+        ↓
+A{} 直接在目标位置构造
+```
+
+因此：
 
 ```cpp
 class A {
@@ -1584,98 +1798,54 @@ A make() {
 A a = make();
 ```
 
-在相应 C++17 guaranteed-elision 场景下仍可成立。
+在相应 guaranteed-elision 场景仍可以成立。
 
-但要区分：
+这再次说明：
+
+> 学 C++ 对象语义时，应关注“最终有哪些对象真正开始 lifetime”，而不是机械地脑补一串临时对象和 move。
+
+但：
 
 ```cpp
 A make() {
-    A a;
-    return a;
+    A x;
+    return x;
 }
 ```
 
-这里是 NRVO（Named Return Value Optimization）场景，不应简单与 `return A{};` 的 C++17 guaranteed copy elision 混为一谈。
-
-学习原则：
-
-```text
-return T{}
-→ 先想到 C++17 prvalue / guaranteed elision
-
-T x;
-return x;
-→ 先想到 NRVO，继续分析
-```
+属于 NRVO 场景，应与 `return A{};` 的 C++17 guaranteed prvalue semantics 区分。
 
 ---
 
-# 22. 多态基类为什么通常需要 `virtual destructor`
+# 29. 统一推导算法
 
-如果：
+以后碰到任何特殊成员函数问题，按下面顺序。
 
-```cpp
-class Base {
-public:
-    ~Base();
-};
-
-class Derived : public Base {
-public:
-    ~Derived();
-};
-
-Base* p = new Derived;
-delete p;
-```
-
-通过基类指针删除动态类型为派生类的对象，而基类析构不是 virtual，在这种典型场景下会产生未定义行为。
-
-正确的多态基类通常应该提供：
-
-```cpp
-class Base {
-public:
-    virtual ~Base() = default;
-};
-```
-
-于是：
-
-```cpp
-Base* p = new Derived;
-delete p;
-```
-
-能够沿动态类型正确执行析构链：
+## Step 1：画对象结构
 
 ```text
-Derived::~Derived()
-↓
-Base::~Base()
+complete object T
+├── base subobject(s)
+└── member subobject(s)
 ```
 
-但是这里又连接回本专题的一个重要规则：
+先知道外层操作最终必须作用到哪些子对象。
 
-```cpp
-virtual ~Base() = default;
+## Step 2：判断类型语义
+
+它更接近：
+
+```text
+value type？
+unique owner？
+shared owner？
+non-owning view？
+polymorphic base？
 ```
 
-仍然是 user-declared destructor。
+这帮助判断“默认语义是否符合设计意图”。
 
-所以它会影响 implicit move constructor / move assignment。
-
-这正是为什么“多态基类设计”和“Rule of Five/Zero”经常相互关联。
-
----
-
-# 23. 一套可重复使用的推导算法
-
-以后看到任何特殊成员函数问题，不要先背口诀，而按下面步骤。
-
-## Step 1：列出类中 user-declared 的函数
-
-先分类：
+## Step 3：列出 user-declared functions
 
 ```text
 DfltCtor?
@@ -1687,47 +1857,27 @@ MoveAssign?
 Dtor?
 ```
 
-特别注意：
+`= default` / `= delete` 都算 user-declared。
 
-```cpp
-= default
-= delete
-```
+## Step 4：过第一阶段抑制矩阵
 
-都仍然属于 user-declared。
-
-## Step 2：使用二维表判断第一阶段
-
-对目标函数判断：
+得到：
 
 ```text
-SELF
-S
-D
-P
-✓
+SELF / S / D / P / ✓
 ```
 
-此时只回答：
+## Step 5：检查 base/member 能力
 
-> **编译器是否建立这个函数，以及声明关系是否直接导致 deleted/deprecated。**
-
-## Step 3：检查 base/member 能力
-
-问：
+对每个 defaulted/implicit operation 问：
 
 ```text
-对应的 base/member 操作是否存在？
+相应子对象 operation 是否存在？
 是否 accessible？
 是否 deleted？
-成员本身是否允许 assignment？
 ```
 
-由此判断 defaulted/implicit special member 是否最终 deleted。
-
-## Step 4：确定表达式值类别
-
-例如：
+## Step 6：确定 source expression 的 value category
 
 ```cpp
 a               // lvalue
@@ -1738,34 +1888,29 @@ A{}             // prvalue
 以及：
 
 ```cpp
-void f(A&& x) {
-    // x 作为表达式是 lvalue
-}
+A&& x; // x 作为表达式是 lvalue
 ```
 
-## Step 5：做 overload resolution
+## Step 7：做 overload resolution
 
-候选可能有：
+候选例如：
 
 ```cpp
 A(const A&)
 A(A&&)
 ```
 
-判断最佳匹配。
+确定最佳匹配。
 
-## Step 6：检查 selected function 是否可用
-
-最后再检查：
+## Step 8：检查 selected function
 
 ```text
 deleted?
 inaccessible?
+特殊规则是否使 candidate 被忽略？
 ```
 
-不要在 overload resolution 之前就用“deleted 所以忽略”这种粗糙模型；只有标准特别规定被忽略的 defaulted-deleted move 等情况才按相应规则处理。
-
-## Step 7：最后检查 C++17 copy elision
+## Step 9：最后检查 copy elision
 
 如果是：
 
@@ -1774,94 +1919,81 @@ return T{};
 T x = T{};
 ```
 
-不要先机械假设一定发生 copy/move。
+先检查 C++17 prvalue / guaranteed copy-elision 语义，不要先数 move 次数。
 
 ---
 
-# 24. 常见误区与纠正
+# 30. 常见误区
 
-## 误区 1：没写特殊成员函数，编译器一定全部生成
+## 误区 1：对象就是一块内存
 
-错误。
+不完整。
 
-正确模型：
-
-```text
-先看声明抑制规则
-↓
-再看 base/member 能力
-↓
-再看是否 deleted
-```
-
-## 误区 2：`= default` 等价于“没写”
-
-错误。
-
-```cpp
-~A() = default;
-```
-
-仍是 user-declared destructor，因此会抑制 implicit move。
-
-## 误区 3：`= delete` 等于函数不存在
-
-错误。
-
-显式 deleted function 仍参与候选集合；如果它是最佳候选，调用会报错。
-
-## 误区 4：`std::move` 会移动资源
-
-错误。
-
-它主要进行值类别转换。资源是否真正移动由被选中的函数实现决定。
-
-## 误区 5：变量类型是 `T&&`，使用它时就是右值
-
-错误。
-
-有名字的 `T&& x` 中，表达式 `x` 是 lvalue。
-
-## 误区 6：带参数 constructor 都不会影响 implicit move
-
-不准确。
-
-`A(int)` 这种 ordinary constructor 不直接抑制 move，但：
-
-```cpp
-A(const A&)
-A(A&&)
-```
-
-也是带参数 constructor，却属于 special member functions，有专门规则。
-
-## 误区 7：程序员在 constructor 中 `new`，编译器就知道这是 owner
-
-错误。
-
-C++ 不通过函数体分析 ownership。裸指针/整数 handle 的资源语义对编译器并不透明可知。
-
-## 误区 8：写了 destructor 就没有 copy
-
-错误。
-
-C++17 中 user-declared destructor 会抑制 implicit move，但 implicit copy 仍可能存在，只是这种组合属于 deprecated implicit-copy 方向。
-
-## 误区 9：move 被 delete 后一定不能从右值构造
-
-不够精确。
-
-需要区分：
+对象还涉及：
 
 ```text
-move 根本没声明
-explicit move = delete
-defaulted move 因组合失败成为 deleted
+type
+lifetime
+value
+identity
+subobject structure
 ```
 
-它们对 overload resolution 的行为并不完全相同。
+## 误区 2：默认 copy 就是 memcpy
 
-## 误区 10：`return T{}` 一定调用一次 move
+错误。
+
+普通非 union class 的 implicit/defaulted copy/move 是逐 base/member 子对象语义。
+
+## 误区 3：`std::move` 会把对象搬到新地址
+
+错误。
+
+它主要改变 expression value category；源对象仍有 identity 和 lifetime。
+
+## 误区 4：`A() = default` 等于什么都没声明
+
+错误。
+
+它是 user-declared default constructor。
+
+## 误区 5：`A(int)` 会抑制 implicit move
+
+错误。
+
+普通 constructor 本身不会；copy/move constructor 有专门规则。
+
+## 误区 6：程序员在 constructor 中 `new`，编译器就知道类是 owner
+
+错误。
+
+ownership 不是从函数体语法推断的。
+
+## 误区 7：写了 destructor 就没有 copy
+
+错误。
+
+C++17 中它抑制 implicit move；implicit copy 仍可能存在，但对应隐式定义属于 deprecated 组合。
+
+## 误区 8：deleted 等于函数不存在
+
+错误。
+
+显式 deleted function 仍参与 overload resolution。
+
+## 误区 9：任何 deleted move 都和 `A(A&&)=delete` 一样
+
+错误。
+
+默认生成失败而 deleted 的 move operation 有专门的 overload-resolution 规则。
+
+## 误区 10：多态对象一定按固定 vptr 布局
+
+错误。
+
+vptr/vtable 是主流 ABI 实现方式，不是标准规定的唯一物理布局。
+
+## 误区 11：`return T{}` 一定调用 move
 
 C++17 下错误。
 
@@ -1869,161 +2001,132 @@ C++17 下错误。
 
 ---
 
-# 25. 学习检查点
+# 31. 学习检查点
 
-在进入新的题目之前，建议能够不用查表回答并解释下面问题。
+完成本章后，应能不用背题解释下面问题。
 
 ### 检查点 1
 
-```cpp
-class A {
-public:
-    A() = default;
-};
+为什么说：
+
+```text
+storage ≠ object
 ```
 
-为什么它不会抑制 implicit copy/move/assignment/destructor？
+constructor 在这个区别中承担什么角色？
 
 ### 检查点 2
 
-```cpp
-class A {
-public:
-    A(int);
-};
-```
-
-为什么它会阻止 implicit `A()`，却不会因为这一点阻止 implicit move constructor？
+`object representation` 和 `value representation` 有什么区别？padding 为什么会出现？
 
 ### 检查点 3
 
+对：
+
 ```cpp
-class A {
-public:
-    ~A() = default;
+struct D : B {
+    M1 m1;
+    M2 m2;
 };
 ```
 
-为什么 `= default` 的析构仍会影响 implicit move？
+为什么 default copy/move/destruct 可以从 B/M1/M2 的能力组合出来？
 
 ### 检查点 4
 
 为什么：
 
 ```cpp
-A(A&&) = delete;
+A() = default;
 ```
 
-和“根本没有 `A(A&&)`”在 overload resolution 中不是同一件事？
+不会因为“是 user-declared constructor”就抑制 implicit move？
 
 ### 检查点 5
-
-为什么 C++ 不通过 constructor 中是否出现 `new` / `malloc` / `open` 判断类型是否拥有资源？
-
-### 检查点 6
-
-解释这三个层次：
-
-```text
-declaration suppression
-↓
-defaulted function becomes deleted
-↓
-overload resolution
-```
-
-### 检查点 7
-
-为什么现代 C++ 更推荐：
-
-```cpp
-std::unique_ptr<T>
-```
-
-而不是：
-
-```cpp
-T* owner;
-```
-
-来表达独占 ownership？
-
-### 检查点 8
 
 为什么：
 
 ```cpp
-void f(A&& x) {
-    g(x);
-}
+A(int);
 ```
 
-中的 `x` 不会自动按右值参与 `g` 的重载决议？
+会使 implicit `A()` 不再产生，却不会直接关闭 implicit `A(A&&)`？
 
-如果这些问题都可以从设计逻辑推导，而不是背结论，这一专题的基础模型才算真正建立。
+### 检查点 6
+
+为什么 constructor 中：
+
+```cpp
+p = new int[100];
+```
+
+不能作为语言自动判断 ownership 的依据？
+
+### 检查点 7
+
+为什么 default copy/move 不能一般理解成 `memcpy`？
+
+### 检查点 8
+
+解释：
+
+```cpp
+A b = std::move(a);
+```
+
+为什么 `a` 的 storage、address 和 lifetime 通常仍然存在？真正“被移动”的是什么？
+
+### 检查点 9
+
+解释三者的区别：
+
+```text
+move 不存在
+explicit move = delete
+defaulted move becomes deleted
+```
+
+### 检查点 10
+
+为什么：
+
+```cpp
+virtual ~Base() = default;
+```
+
+既解决 polymorphic destruction contract，又会影响 implicit move generation？
+
+### 检查点 11
+
+为什么：
+
+```cpp
+return T{};
+```
+
+在 C++17 中应该从“对象直接在最终 storage 中产生”的模型理解，而不是机械地数 copy/move？
+
+如果这些问题能够从对象模型一步步推导出来，再进入选择题验证才有意义。
 
 ---
 
-# 26. 参考资料
+# 32. 参考资料
 
-本文语义基线为 C++17，规则整理主要对应以下标准主题：
+本文语义基线为 **C++17**。规则核对优先参考：
 
-- ISO C++17 working draft N4659：`[class.ctor]`、`[class.copy]`、`[class.copy.ctor]`、`[class.copy.assign]`；
-- cppreference：Default constructors；
-- cppreference：Copy constructors；
-- cppreference：Move constructors；
-- cppreference：Copy assignment operator；
-- cppreference：Move assignment operator；
-- cppreference：Destructors；
-- cppreference：The rule of three/five/zero。
+- C++17 working draft / N4659：`[intro.object]`、`[basic.types]`、`[class.ctor]`、`[class.copy]`、`[class.dtor]`、`[depr.impldec]`
+- cppreference：Object、Constructors、Copy constructors、Move constructors、Copy assignment、Move assignment、Destructor、Copy elision、Value categories
 
-阅读标准材料时，要特别区分标准措辞中的：
+后续专题将沿用同一学习方法：
 
 ```text
-user-declared
-implicitly-declared
-implicitly-defined
-defaulted
-deleted
+内存 / 对象模型
+↓
+语言语义
+↓
+标准规则
+↓
+工程设计
+↓
+少量题目验收
 ```
-
-不要用“编译器帮我生成/没生成”一句话覆盖所有不同阶段。
-
----
-
-# 结语：真正应该带走的模型
-
-这一专题最终不是为了记住一张二维表。
-
-真正需要形成的是下面这个模型：
-
-```text
-            class declaration
-                  │
-                  ▼
-     第一阶段：哪些 special member
-            会被 declared？
-                  │
-                  ▼
-      base/member type capabilities
-                  │
-                  ▼
-     第二阶段：defaulted/implicit
-        function 是否 deleted？
-                  │
-                  ▼
-          call expression
-       + expression value category
-                  │
-                  ▼
-       第三阶段：overload resolution
-                  │
-                  ▼
-        copy / move / compile error
-```
-
-再往上抽象一层：
-
-> **C++ 不试图猜测你的资源管理意图；它要求类型通过声明和成员类型表达对象语义，然后由语言规则机械地组合这些语义。**
-
-这正是 RAII、Rule of Zero、move semantics 以及整套特殊成员函数规则能够统一起来的设计逻辑。
