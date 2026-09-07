@@ -11,8 +11,12 @@
   - 从 storage / lifetime / object representation / subobject 开始，系统覆盖 constructor/destructor、copy/move、`= default`、`= delete`、特殊成员函数隐式生成与抑制关系、RAII、Rule of Three/Five/Zero、C++17 copy elision 等。
 
 - [`textbook/polymorphism-overload-and-dispatch.md`](./textbook/polymorphism-overload-and-dispatch.md)
-  - 多态、重载、名字查找与虚派发专题。
+  - 多态、重载、名字查找与虚派发总专题。
   - 从 Base subobject、most-derived object、static type / dynamic type 开始，系统覆盖 name lookup、overload resolution、name hiding、`using Base::f`、override、virtual dispatch、default arguments、构造/析构期虚调用、object slicing、virtual destructor、RTTI、多继承二义性等。
+
+- [`textbook/virtual-functions-deep-dive.md`](./textbook/virtual-functions-deep-dive.md)
+  - 虚函数专题深化。
+  - 按“为什么需要 → C++17 标准对象语义 → 编译器/ABI 典型实现”展开，重点讲解哪些函数能/不能 virtual、constructor/destructor 的差异、upcast 后为何仍能动态派发、vptr/vtable/slot、`this` adjustment/thunk、多继承/虚继承、pure virtual、NVI、devirtualization 与性能边界等。
 
 后续新增专题统一放入 `textbook/`，避免同时维护多个内容重叠的 notes 版本。
 
@@ -39,13 +43,17 @@
 ```text
 1. object-lifetime-and-special-member-functions.md
         ↓
-   先建立 object / subobject / lifetime / value / identity 模型
+   建立 object / subobject / lifetime / value / identity 模型
         ↓
 2. polymorphism-overload-and-dispatch.md
         ↓
-   在对象模型上建立 static type / dynamic type / call dispatch 模型
+   建立 static type / dynamic type / lookup / overload / dispatch 总模型
         ↓
-3. reviews + mock-exam
+3. virtual-functions-deep-dive.md
+        ↓
+   深入 virtual 的对象语义、生命周期边界和 ABI 实现
+        ↓
+4. reviews + mock-exam
         ↓
    用少量题目验证模型是否稳定
 ```
