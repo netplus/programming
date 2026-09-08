@@ -11,14 +11,11 @@
   - 从 storage / lifetime / object representation / subobject 开始，系统覆盖 constructor/destructor、copy/move、`= default`、`= delete`、特殊成员函数隐式生成与抑制关系、RAII、Rule of Three/Five/Zero、C++17 copy elision 等。
 
 - [`textbook/polymorphism-overload-and-dispatch.md`](./textbook/polymorphism-overload-and-dispatch.md)
-  - 多态、重载、名字查找与虚派发总专题。
-  - 从 Base subobject、most-derived object、static type / dynamic type 开始，系统覆盖 name lookup、overload resolution、name hiding、`using Base::f`、override、virtual dispatch、default arguments、构造/析构期虚调用、object slicing、virtual destructor、RTTI、多继承二义性等。
+  - **继承、多态、重载与虚函数的唯一主教材。**
+  - 从 Base subobject / most-derived object 开始，完整覆盖 Derived→Base 的对象/指针/引用关系、object slicing、public/private inheritance、多继承、普通/虚菱形继承、virtual base 构造析构、name lookup、overload resolution、hiding、`using Base::f`、override、virtual dispatch、pure virtual、virtual destructor、RTTI，以及 vptr/vtable、address adjustment、thunk、virtual-base offset、devirtualization 等典型编译器/ABI 实现。
+  - 学习顺序遵循：**对象模型 → 静态调用决议 → 动态多态 → 编译器实现 → 统一推导。**
 
-- [`textbook/virtual-functions-deep-dive.md`](./textbook/virtual-functions-deep-dive.md)
-  - 虚函数专题深化。
-  - 按“为什么需要 → C++17 标准对象语义 → 编译器/ABI 典型实现”展开，重点讲解哪些函数能/不能 virtual、constructor/destructor 的差异、upcast 后为何仍能动态派发、vptr/vtable/slot、`this` adjustment/thunk、多继承/虚继承、pure virtual、NVI、devirtualization 与性能边界等。
-
-后续新增专题统一放入 `textbook/`，避免同时维护多个内容重叠的 notes 版本。
+后续新增专题统一放入 `textbook/`，避免同时维护多个内容重叠的 notes / deep-dive 版本。
 
 ### 2. 学习方法
 
@@ -47,13 +44,17 @@
         ↓
 2. polymorphism-overload-and-dispatch.md
         ↓
-   建立 static type / dynamic type / lookup / overload / dispatch 总模型
+   继承对象模型
         ↓
-3. virtual-functions-deep-dive.md
+   static type / lookup / overload
         ↓
-   深入 virtual 的对象语义、生命周期边界和 ABI 实现
+   virtual / override / final overrider
         ↓
-4. reviews + mock-exam
+   multiple / diamond / virtual inheritance
+        ↓
+   vptr / vtable / thunk / RTTI / devirtualization
+        ↓
+3. reviews + mock-exam
         ↓
    用少量题目验证模型是否稳定
 ```
